@@ -32,7 +32,7 @@ exports.actualizarEstadoPago = functions.https.onRequest((req, res) => {
       `<h1>Reserva cancelada</h1>
         <br/>
         <p> La reserva de la clase del dia ${req.body.date} de la
-        materia ${req.body.materia} porque no se pago dentro de 10'</p>  
+        materia ${req.body.materia} porque no se pago dentro de 60'</p>  
         <br/>
         <p> Esperamos verte en una clase pronto! </p>`,
     },
@@ -46,7 +46,7 @@ exports.actualizarEstadoPago = functions.https.onRequest((req, res) => {
           if (snapshot.exists) {
             const datos = snapshot.data();
             if (datos.idMercadoPago === undefined) {
-              if (count >= 5) {
+              if (count >= 60) {
                 clearInterval(interval);
                 reserva.delete().then(()=>{
                   const options = {
@@ -280,3 +280,4 @@ exports.paymentOk = functions.https.onRequest(async (req, res) => {
   }
   res.status(200).send("Payment received and logged successfully.");
 });
+
