@@ -281,3 +281,37 @@ exports.paymentOk = functions.https.onRequest(async (req, res) => {
   res.status(200).send("Payment received and logged successfully.");
 });
 
+exports.getUserDisplayName = functions.https.onRequest(async (req, res) => {
+  const uid = req.body.uid;
+  console.log(uid);
+  if (!uid) {
+    return res.status(400).send('Missing UID');
+  }
+
+  try {
+    const userRecord = await admin.auth().getUser(uid);
+    console.log(userRecord.email);
+    console.log(userRecord.displayName);
+    return res.status(200).send({ displayName: userRecord.displayName });
+  } catch (error) {
+    return res.status(500).send({ error: error.message });
+  }
+});
+
+exports.updateUserDisplayName = functions.https.onRequest(async (req, res) => {
+  const uid = req.body.uid;
+  const newDisplayName = req.body.displayName;
+
+  if (!uid || !newDisplayName) {
+    return res.status(400).send('Missing UID or DisplayName');
+  }
+
+  try {
+    await admin.auth().updateUser(uid, {
+      displayName: newDisplayName,
+    });
+    return res.status(200).send({ message: `Display name updated to ${newDisplayName}` });
+  } catch (error) {
+    return res.status(500).send({ error: error.message });
+  }
+});
