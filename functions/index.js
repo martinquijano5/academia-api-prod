@@ -119,12 +119,12 @@ exports.paymentProd = functions.https.onRequest(async (req, res) => {
         quantity: 1,
       }],
       back_urls: {
-        success: `https://tuni.com.ar/paymentOk/${req.body.firebaseId}/${req.body.calendlyId}`,
+        success: `https://tuni.com.ar/paymentOk/${req.body.firebaseId}/${req.body.calendlyId}`, //aca manda al usuario una vez realizado el pago
         failure: "https://tuni.com.ar/miPerfil",
         pending: "",
       },
       auto_return: "approved",
-      notification_url: `https://us-central1-prueba-2e666.cloudfunctions.net/paymentOk?firebaseId=${req.body.firebaseId}&calendlyId=${req.body.calendlyId}`,
+      notification_url: `https://us-central1-prueba-2e666.cloudfunctions.net/paymentOk?firebaseId=${req.body.firebaseId}&calendlyId=${req.body.calendlyId}&profesorId=${req.body.profesorId}`, // aca manda un request http cuando se realiza el pago
       binary_mode: true,
     },
   })
@@ -135,6 +135,9 @@ exports.paymentProd = functions.https.onRequest(async (req, res) => {
         console.log(err);
       });
 });
+//paymentProd genera el pago
+
+
 
 exports.checkPayment = functions.https.onRequest(async (req, res) => {
   // Configurar CORS headers para permitir solicitudes desde cualquier origen
@@ -281,37 +284,17 @@ exports.paymentOk = functions.https.onRequest(async (req, res) => {
   res.status(200).send("Payment received and logged successfully.");
 });
 
-exports.getUserDisplayName = functions.https.onRequest(async (req, res) => {
-  const uid = req.body.uid;
-  console.log(uid);
-  if (!uid) {
-    return res.status(400).send('Missing UID');
-  }
 
-  try {
-    const userRecord = await admin.auth().getUser(uid);
-    console.log(userRecord.email);
-    console.log(userRecord.displayName);
-    return res.status(200).send({ displayName: userRecord.displayName });
-  } catch (error) {
-    return res.status(500).send({ error: error.message });
-  }
-});
 
-exports.updateUserDisplayName = functions.https.onRequest(async (req, res) => {
-  const uid = req.body.uid;
-  const newDisplayName = req.body.displayName;
+exports.generateOneTimeCalendlyLink = functions.https.onRequest(async (req,res) => {
+  let firebaseId;
+  let calendlyId;
+  let profesorId;
 
-  if (!uid || !newDisplayName) {
-    return res.status(400).send('Missing UID or DisplayName');
-  }
+  //paso 1 llamar a la bd para obtener el documento de id profesorId
 
-  try {
-    await admin.auth().updateUser(uid, {
-      displayName: newDisplayName,
-    });
-    return res.status(200).send({ message: `Display name updated to ${newDisplayName}` });
-  } catch (error) {
-    return res.status(500).send({ error: error.message });
-  }
-});
+  //paso 2 llamar a la api con bearer y link_scheduling
+
+  //paso 3 return booking_url de response de api
+
+})
