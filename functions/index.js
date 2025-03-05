@@ -3,298 +3,270 @@ const admin = require("firebase-admin");
 const axios = require("axios");
 const {MercadoPagoConfig, Preference} = require("mercadopago");
 
+// Function to format date in Spanish for Argentina timezone
+function formatFechaHora(fechaHoraISO) {
+  if (!fechaHoraISO) return "fecha no disponible";
+  
+  // Create date object without timezone adjustment
+  const date = new Date(fechaHoraISO);
+  
+  // Days of the week in Spanish
+  const diasSemana = [
+    "Domingo", "Lunes", "Martes", "Miércoles", 
+    "Jueves", "Viernes", "Sábado"
+  ];
+  
+  // Months in Spanish
+  const meses = [
+    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio",
+    "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+  ];
+  
+  // Format the components
+  const diaSemana = diasSemana[date.getDay()];
+  const dia = date.getDate();
+  const mes = meses[date.getMonth()];
+  const anio = date.getFullYear();
+  const hora = date.getHours().toString().padStart(2, '0');
+  const minutos = date.getMinutes().toString().padStart(2, '0');
+  
+  // Return formatted string
+  return `${diaSemana} ${dia} de ${mes} de ${anio} a las ${hora}:${minutos}`;
+}
+
 admin.initializeApp();
-// esta es la funcion que hace que si no paga en 15 mins se cancele la reserva
 
-exports.actualizarEstadoPago = functions.https.onRequest((req, res) => {
-  // Configurar CORS headers para permitir solicitudes desde cualquier origen
-  res.set("Access-Control-Allow-Origin", "*");
-  res.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
-
-  // Verificar si es una solicitud de tipo OPTIONS (preflight)
-  if (req.method === "OPTIONS") {
-    res.status(204).send("");
+exports.paymentOkNueva = functions.https.onRequest(async (req, res) => {
+  console.log("arranco");
+  
+  // Extract notification type
+  const notificationType = req.query.topic || (req.body && req.body.action && req.body.action.split('.')[0]);
+  console.log("Notification type:", notificationType);
+  
+  // Only process payment notifications and ignore duplicates
+  if (notificationType !== "payment") {
+    console.log(`Ignoring ${notificationType} notification`);
+    res.status(200).send("OK");
     return;
   }
-
-  // Resto de tu lógica de la función aquí
-  if (!req.headers.authorization) {
-    res.status(403).json({error: "No autenticado"});
+  
+  // Extract payment ID from different possible sources
+  const paymentId = req.query.id || (req.query['data.id']) || (req.body && req.body.data && req.body.data.id) ||(req.body && req.body.resource);
+                   
+  // Extract MP key
+  const mpKey = req.query.mpKey;
+  
+  if (!paymentId || !mpKey) {
+    console.log("Missing payment ID or MP key");
+    res.status(400).send("Missing required parameters");
     return;
   }
-
-  const emailAlumno = {
-    to: req.body.user,
-    message: {
-      subject: "Reserva cancelada",
-      html:
-      `<h1>Reserva cancelada</h1>
-        <br/>
-        <p> La reserva de la clase del dia ${req.body.date} de la
-        materia ${req.body.materia} porque no se pago dentro de 60'</p>  
-        <br/>
-        <p> Esperamos verte en una clase pronto! </p>`,
-    },
-  };
-  let count = 1;
-  const interval = setInterval(async () => {
-    const reserva = admin.firestore().collection("reservas")
-        .doc(req.body.id);
-    reserva.get()
-        .then((snapshot) => {
-          if (snapshot.exists) {
-            const datos = snapshot.data();
-            if (datos.idMercadoPago === undefined) {
-              if (count >= 60) {
-                clearInterval(interval);
-                reserva.delete().then(()=>{
-                  const options = {
-                    method: "POST",
-                    headers:
-                      {"Content-Type": "application/json",
-                        "Authorization": req.body.auth,
-                      },
-                    body: JSON.stringify(
-                        {"reason": "no se pago dentro de los 10' validos"}),
-                  };
-                  fetch(`https://api.calendly.com/scheduled_events/${req.body.calendlyId}/cancellation`, options)
-                      .then(()=> {
-                        admin.firestore().collection("mails").add(emailAlumno)
-                            .then((res) => console.log(res))
-                            .catch((err)=> console.log(err));
-                      })
-                      .catch((err)=> console.log(err));
-                });
-              }
-            } else {
-              console.log(reserva, "hecho");
-              clearInterval(interval);
-            }
-          } else {
-            console.log("El documento no existe");
-          }
-        }).catch((error) => {
-          console.log(error);
-        });
-    count += 1;
-  }, 60000);
-
-  res.status(200).send("Proceso completado");
-});
-
-/**
- * Te da la key de mp en base al id del profesor.
- * @param {number} id - The ID to determine which key to retrieve.
- * @return {string} The retrieved key.
- */
-
-exports.paymentProd = functions.https.onRequest(async (req, res) => {
-  // Configurar CORS headers para permitir solicitudes desde cualquier origen
-  res.set("Access-Control-Allow-Origin", "*");
-  res.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  // Verificar si es una solicitud de tipo OPTIONS (preflight)
-  if (req.method === "OPTIONS") {
-    res.status(204).send("");
-    return;
-  }
-  // Resto de tu lógica de la función aquí
-  if (!req.headers.authorization) {
-    res.status(403).json({error: "No autenticado"});
-    return;
-  }
-  const client = new MercadoPagoConfig({accessToken: req.body.key});
-  const preference = new Preference(client);
-
-  preference.create({
-    body: {
-      items: [{
-        title: req.body.title,
-        currency_id: "ARS",
-        picture_url: req.body.image,
-        description: req.body.description,
-        category_id: "art",
-        unit_price: req.body.price,
-        quantity: 1,
-      }],
-      back_urls: {
-        success: `https://tuni.com.ar/paymentOk/${req.body.firebaseId}/${req.body.calendlyId}`, //aca manda al usuario una vez realizado el pago
-        failure: "https://tuni.com.ar/miPerfil",
-        pending: "",
-      },
-      auto_return: "approved",
-      notification_url: `https://us-central1-prueba-2e666.cloudfunctions.net/paymentOk?firebaseId=${req.body.firebaseId}&calendlyId=${req.body.calendlyId}&profesorId=${req.body.profesorId}`, // aca manda un request http cuando se realiza el pago
-      binary_mode: true,
-    },
-  })
-      .then((response) => {
-        console.log(response);
-        res.status(200).send({response});
-      }).catch((err) => {
-        console.log(err);
-      });
-});
-//paymentProd genera el pago
-
-
-
-exports.checkPayment = functions.https.onRequest(async (req, res) => {
-  // Configurar CORS headers para permitir solicitudes desde cualquier origen
-  res.set("Access-Control-Allow-Origin", "*");
-  res.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  // Verificar si es una solicitud de tipo OPTIONS (preflight)
-  if (req.method === "OPTIONS") {
-    res.status(204).send("");
-    return;
-  }
-
-  // Resto de tu lógica de la función aquí
-  if (!req.headers.authorization) {
-    res.status(403).json({error: "No autenticado"});
-    return;
-  }
-
-  console.log(req.body);
-
+  
   try {
-    const response = await axios.get(
-        `https://api.mercadopago.com/v1/payments/${req.body.mpId}`,
+    // Check if a reservation with this payment ID already exists
+    const existingReservations = await admin.firestore()
+      .collection("reservas")
+      .where("idMercadoPago", "==", paymentId)
+      .get();
+    
+    if (!existingReservations.empty) {
+      console.log(`Reservation for payment ${paymentId} already exists. Skipping duplicate notification.`);
+      res.status(200).send("OK - Duplicate notification ignored");
+      return;
+    }
+    
+    // Get payment details from Mercado Pago using Axios
+    const paymentResponse = await axios.get(
+      `https://api.mercadopago.com/v1/payments/${paymentId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${mpKey}`
+        }
+      }
+    );
+    
+    const paymentDetails = paymentResponse.data;
+    
+    // Extract metadata from payment
+    const metadata = paymentDetails.metadata || {};
+    
+    console.log("Full payment details:", JSON.stringify(paymentDetails));
+    console.log("Full metadata:", JSON.stringify(metadata));
+    
+    // STEP 2: Generate Calendly link
+    let calendlyBookingUrl = null;
+    try {
+      if (!metadata.profesor.auth_calendly || !metadata.profesor.link_scheduling) {
+        throw new Error("Missing Calendly credentials in metadata");
+      }
+      
+      const calendlyResponse = await axios.post(
+        'https://api.calendly.com/scheduling_links',
+        {
+          "max_event_count": "1",
+          "owner": metadata.profesor.link_scheduling,
+          "owner_type": "EventType"
+        },
         {
           headers: {
-            Authorization: req.body.Authorization,
-          },
-        },
-    );
-    console.log(response);
-    const data = response.data.status;
-    res.json(data);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({error: "Error al obtener el estado del pago"});
-  }
-});
-
-exports.paymentOk = functions.https.onRequest(async (req, res) => {
-  // Configurar CORS headers para permitir solicitudes desde cualquier origen
-  res.set("Access-Control-Allow-Origin", "*");
-  res.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  // Verificar si es una solicitud de tipo OPTIONS (preflight)
-  if (req.method === "OPTIONS") {
-    res.status(204).send("");
-    return;
-  }
-  const queryParams = new URLSearchParams(req.url);
-  const paramsObject = {};
-  for (const [key, value] of queryParams.entries()) {
-    paramsObject[key] = value;
-  }
-  if (paramsObject.type === "payment") {
-    console.log(paramsObject);
-    console.log("calendlyId: ", paramsObject["/?calendlyId"]);
-    console.log("firebaseId: ", paramsObject.firebaseId);
-    console.log("id: ", paramsObject["data.id"]);
-    console.log("type: ", paramsObject.type);
-    try {
-      const usuario = admin.firestore().collection("users")
-          .doc(paramsObject.firebaseId);
-      usuario.get()
-          .then((snapshot) => {
-            if (snapshot.exists) {
-              console.log("Encontre el documento");
-              const datos = snapshot.data();
-              const array = datos.reservas;
-              const index = array.findIndex((element) =>
-                element.idCalendly == paramsObject["/?calendlyId"]);
-              console.log(index, "posCalendlyt");
-              if (index !== -1) {
-                console.log("Encontre la reserva");
-                console.log("Encontre los profesores");
-                if (array[index].idMercadoPago && array[index].idMercadoPago > 0) {
-                  array[index].idMercadoPago = paramsObject["data.id"];
-                  const newArr = array.filter((elm) => elm.idCalendly !=
-                    paramsObject.calendlyId);
-                  newArr.push(
-                      {
-                        idCalendly: array[index].idCalendly,
-                        idMercadoPago: array[index].idMercadoPago,
-                        info: array[index].info,
-                        idPreferenceMercadoPago:
-                          array[index].idPreferenceMercadoPago,
-                      });
-                  console.log(newArr);
-                  usuario.update({reservas: newArr})
-                      .then(() => {
-                        admin.firestore().collection("info").get()
-                            .then((info) => {
-                              const profesores = info.docs[0].data().profesores;
-                              const profeSel = profesores.filter((prof) => prof.nombre === array[index].info.profesor);
-                              const direccionProfesor = profeSel[0].email;
-                              const direcionAlumno = datos.owner;
-                              const nombreAlumno = datos.name + " " + datos.surname;
-                              const data = array[index].info;
-                              const emailProfesor = {
-                                to: direccionProfesor,
-                                message: {
-                                  subject: "Reserva confirmada",
-                                  html: `
-                                  <h1>Reserva confirmada</h1>
-                                  <br/>
-                                  <p> El alumno ${nombreAlumno} confirmo la clase del dia ${data.fechaText} de la materia ${data.materia}. Los temas a ver son ${data.temas} </p>
-                                  <br/>
-                                  <button><a href=${data.meet} target="_blank">Ir al meet</a></button>
-                                  `,
-                                },
-                              };
-                              const emailAlumno = {
-                                to: direcionAlumno,
-                                message: {
-                                  subject: `Reserva confirmada para tu clase de ${data.materia}`,
-                                  html: `
-                                  <p> Hola ${nombreAlumno} </p>
-                                  <br/>
-                                  <p> Tu clase particular con ${data.profesor} para la materia ${data.materia} ha sido confirmada con exito! La clase esta programada para el ${data.fechaText}. Podes acceder a la clase <a href=${data.meet} target="_blank">a traves de este link</a>. </p>  
-                                  <br/>
-                                  <p> ¡Gracias por confiar en nosotros para tu aprendizaje! Si necesitas otra alternativa o tenes alguna pregunta, no dudes en dejarnos un <a href="wa.me/5491135004141"> mensaje por whatsapp </a>  o respondiendo este mail. </p>
-                                  <br/>
-                                  <p> Nos vemos en clase! </p>
-                                  `,
-                                },
-                              };
-                              admin.firestore().collection("mails").add(emailAlumno)
-                                  .then(() => admin.firestore().collection("mails").add(emailProfesor))
-                                  .then(() => res.status(200));
-                            });
-                      });
-                }
-              } else {
-                res.status(500).json({error: "La reserva no existe"});
-              }
-            } else {
-              res.status(500).json({error: "El documento no existe"});
-            }
-          });
-    } catch (error) {
-      console.error(error);
-      res.status(500).json({error: "Error al obtener el estado del pago"});
+            'Authorization': `Bearer ${metadata.profesor.auth_calendly}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+      
+      calendlyBookingUrl = calendlyResponse.data.resource.booking_url;
+    } catch (calendlyError) {
+      console.log("Error creating Calendly scheduling link:", calendlyError);
+      // We continue even if Calendly fails, but with null booking URL
     }
+    
+    // Step 3: Create reservation document in Firestore
+
+    const reservaData = {
+      link_scheduling_calendly: calendlyBookingUrl,
+      idMercadoPago: paymentId,
+      profesor: metadata.profesor.email,
+      user: metadata.usuario.mail,
+      info: {
+        duracion: 90,
+        fecha: metadata.fecha_hora || " ",
+        materia: metadata.materia || " ",
+        meet: " ", // Will be populated after Calendly confirmation
+        nameEstudiante: metadata.usuario.nombre || " ",
+        nameProfe: metadata.profesor.nombre || " ",
+        estadoReserva: "pagado",
+        temas: " ",  // Will be populated after Calendly confirmation
+        video: " ",
+        createdAt: Date.now(),
+        precio: metadata.price || " ",
+        cantAlumnos: metadata.cant_alumnos || 1,
+        universidad: metadata.universidad.codigo || " ",
+        carrera: `${metadata.carrera.codigo_universidad} ${metadata.carrera.nombre}` || " ",
+      }
+    };   
+    
+    // Use a transaction to ensure we don't create duplicates
+    await admin.firestore().runTransaction(async (transaction) => {
+      // Check again inside transaction if a reservation exists
+      const reservationsRef = admin.firestore().collection("reservas");
+      const snapshot = await transaction.get(
+        reservationsRef.where("idMercadoPago", "==", paymentId)
+      );
+      
+      if (!snapshot.empty) {
+        console.log("Reservation already exists (checked in transaction)");
+        return;
+      }
+      
+      // Create new reservation
+      const newReservationRef = reservationsRef.doc();
+      transaction.set(newReservationRef, reservaData);
+      console.log("Reservation created with ID:", newReservationRef.id);
+    });
+    
+    // Step 4: Send confirmation email to the user
+    try {
+      const emailAlumno = {
+        to: metadata.usuario.mail,
+        message: {
+          subject: `Reserva pagada para tu clase de ${metadata.materia}`,
+          html: `
+            <h1>Reserva pagada</h1>
+            <br/>
+            <p>Hola ${metadata.usuario.nombre || "Estudiante"},</p>
+            <p>Tu pago para la clase de ${metadata.materia} del dia ${formatFechaHora(metadata.fecha_hora)} ha sido confirmado.</p>
+            <p>Para confirmar tu reserva, por favor ingresa al siguiente enlace:</p>
+            <p><a href=${`http://tuni.com.ar/confirmarReserva/?payment_id=${paymentId}&status=approved`}>Confirmar reserva</a></p>
+            <p>Una vez confirmada la reserva, recibirás un correo de confirmación con el enlace para unirte a la clase.</p>
+            <p>Si ya confirmaste la reserva, no es necesario que ingreses al enlace.</p>
+            <br/>
+            <p>¡Gracias por confiar en nosotros para tu aprendizaje!</p>
+          `,
+        },
+      };
+      
+      await admin.firestore().collection("mails").add(emailAlumno);
+    } catch (emailError) {
+      console.log("Error sending confirmation email:", emailError);
+      // Continue execution even if email fails
+    }
+    
+    console.log('fin, todo ok');
+    res.status(200).send("OK");
+  } catch (error) {
+    console.log("Error processing payment:", error);
+    res.status(500).send("Error processing payment");
   }
-  res.status(200).send("Payment received and logged successfully.");
 });
 
+// Add this new function at the end of your file
+exports.paymentProdNuevaV2 = functions.https.onCall(async (data, context) => {
+  console.log("paymentProdNuevaV2 called with data:", data);
+  
+  try {
+    // Initialize MercadoPago with the professor's key
+    const client = new MercadoPagoConfig({accessToken: data.profesor.mpKey});
+    const preference = new Preference(client);
 
-
-exports.generateOneTimeCalendlyLink = functions.https.onRequest(async (req,res) => {
-  let firebaseId;
-  let calendlyId;
-  let profesorId;
-
-  //paso 1 llamar a la bd para obtener el documento de id profesorId
-
-  //paso 2 llamar a la api con bearer y link_scheduling
-
-  //paso 3 return booking_url de response de api
-
-})
+    // Create preference data
+    const preferenceData = {
+      body: {
+        items: [{
+          title: `Clase particular Tuni`,
+          currency_id: "ARS",
+          picture_url: "https://www.tuni.com.ar/Tuni.svg",
+          description: `Clase particular con ${data.profesor.nombre} para la materia ${data.materia}`,
+          category_id: "art",
+          unit_price: Number(data.price),
+          quantity: 1,
+        }],
+        back_urls: {
+          success: `http://tuni.com.ar/confirmarReserva/`,
+          failure: "https://tuni.com.ar/reservar",
+          pending: "https://tuni.com.ar/reservar",
+        },
+        auto_return: "approved",
+        notification_url: `https://us-central1-prueba-2e666.cloudfunctions.net/paymentOkNueva?mpKey=${data.profesor.mpKey}`,
+        binary_mode: true,
+        metadata: data,
+        // Exclude cash payment methods
+        payment_methods: {
+          excluded_payment_methods: [
+            { id: "cash" },
+            { id: "ticket" },
+            { id: "atm" },
+            { id: "bank_transfer" },
+            { id: "pagofacil" },
+            { id: "rapipago" }
+          ],
+          excluded_payment_types: [
+            { id: "ticket" },
+            { id: "atm" }
+          ]
+        }
+      },
+    };
+    
+    console.log('Creating MercadoPago preference with data:', preferenceData);
+    
+    // Create the preference in MercadoPago
+    const response = await preference.create(preferenceData);
+    console.log('MercadoPago response:', response);
+    
+    // Return the response to the client
+    return {
+      success: true,
+      response: response
+    };
+  } catch (error) {
+    console.error("Function error:", error);
+    
+    // Return a proper error that can be handled by the client
+    throw new functions.https.HttpsError(
+      'internal', 
+      error.message || 'Unknown error occurred',
+      { details: error.toString() }
+    );
+  }
+});
