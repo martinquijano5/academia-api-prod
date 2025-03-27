@@ -63,13 +63,14 @@ exports.paymentOkNueva = functions.https.onRequest(async (req, res) => {
   }
   
   try {
-    // Check if a reservation with this payment ID already exists
-    const existingReservations = await admin.firestore()
-      .collection("reservas")
-      .where("idMercadoPago", "==", paymentId)
-      .get();
+    // Create a document reference with just the paymentId as the document ID
+    // This ensures we can't create duplicate documents for the same payment
+    const reservationRef = admin.firestore().collection("reservas").doc(paymentId);
     
-    if (!existingReservations.empty) {
+    // Check if the document already exists
+    const docSnapshot = await reservationRef.get();
+    
+    if (docSnapshot.exists) {
       console.log(`Reservation for payment ${paymentId} already exists. Skipping duplicate notification.`);
       res.status(200).send("OK - Duplicate notification ignored");
       return;
@@ -122,7 +123,6 @@ exports.paymentOkNueva = functions.https.onRequest(async (req, res) => {
     }
     
     // Step 3: Create reservation document in Firestore
-
     const reservaData = {
       link_scheduling_calendly: calendlyBookingUrl,
       idMercadoPago: paymentId,
@@ -146,24 +146,9 @@ exports.paymentOkNueva = functions.https.onRequest(async (req, res) => {
       }
     };   
     
-    // Use a transaction to ensure we don't create duplicates
-    await admin.firestore().runTransaction(async (transaction) => {
-      // Check again inside transaction if a reservation exists
-      const reservationsRef = admin.firestore().collection("reservas");
-      const snapshot = await transaction.get(
-        reservationsRef.where("idMercadoPago", "==", paymentId)
-      );
-      
-      if (!snapshot.empty) {
-        console.log("Reservation already exists (checked in transaction)");
-        return;
-      }
-      
-      // Create new reservation
-      const newReservationRef = reservationsRef.doc();
-      transaction.set(newReservationRef, reservaData);
-      console.log("Reservation created with ID:", newReservationRef.id);
-    });
+    // Create the document with the payment ID as the document ID
+    await reservationRef.set(reservaData);
+    console.log(`Reservation created with ID: ${paymentId}`);
     
     // Step 4: Send confirmation email to the user
     try {
