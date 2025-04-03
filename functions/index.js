@@ -162,7 +162,7 @@ exports.paymentOkNueva = functions.https.onRequest(async (req, res) => {
             <p>Hola ${metadata.usuario.nombre || "Estudiante"},</p>
             <p>Tu pago para la clase de ${metadata.materia} del dia ${formatFechaHora(metadata.fecha_hora)} ha sido confirmado.</p>
             <p>Para confirmar tu reserva, por favor ingresa al siguiente enlace:</p>
-            <p><a href=${`http://tuni.com.ar/confirmarReserva/?payment_id=${paymentId}&status=approved`}>Confirmar reserva</a></p>
+            <p><a href=${`http://tuni.com.ar/confirmarReserva/?payment_id=${paymentId}&status=approved`}>http://tuni.com.ar/confirmarReserva/?payment_id=${paymentId}&status=approved</a></p>
             <p>Una vez confirmada la reserva, recibirás un correo de confirmación con el enlace para unirte a la clase.</p>
             <p>Si ya confirmaste la reserva, no es necesario que ingreses al enlace.</p>
             <br/>
