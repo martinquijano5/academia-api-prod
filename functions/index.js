@@ -2,6 +2,7 @@ const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 const axios = require("axios");
 const {MercadoPagoConfig, Preference} = require("mercadopago");
+const cors = require('cors')({ origin: true });
 
 // Function to format date in Spanish for Argentina timezone
 function formatFechaHora(fechaHoraISO) {
@@ -254,4 +255,37 @@ exports.paymentProdNuevaV2 = functions.https.onCall(async (data, context) => {
       { details: error.toString() }
     );
   }
+});
+
+exports.getAllUserss = functions.https.onRequest(async (req, res) => {
+  // Enable CORS
+  return cors(req, res, async () => {
+    try {
+      const usersList = [];
+      let pageToken = undefined;
+      
+      // Handle pagination to get all users
+      do {
+        const listUsersResult = await admin.auth().listUsers(1000, pageToken);
+        
+        // Extract only email and displayName for each user
+        listUsersResult.users.forEach(userRecord => {
+          usersList.push({
+            email: userRecord.email,
+            displayName: userRecord.displayName || null
+          });
+        });
+        
+        pageToken = listUsersResult.pageToken;
+      } while (pageToken);
+      
+      res.status(200).json({ users: usersList });
+    } catch (error) {
+      console.error("Error listing users:", error);
+      res.status(500).json({ 
+        error: "Error retrieving users",
+        details: error.toString() 
+      });
+    }
+  });
 });
