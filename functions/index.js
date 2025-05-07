@@ -208,7 +208,7 @@ exports.paymentProdNuevaV2 = functions.https.onCall(async (data, context) => {
           quantity: 1,
         }],
         back_urls: {
-          success: `http://tuni.com.ar/confirmarReserva/`,
+          success: `https://tuni.com.ar/confirmarReserva/`,
           failure: "https://tuni.com.ar/reservar",
           pending: "https://tuni.com.ar/reservar",
         },
