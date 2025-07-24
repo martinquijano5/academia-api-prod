@@ -35,6 +35,34 @@ function formatFechaHora(fechaHoraISO) {
   return `${diaSemana} ${dia} de ${mes} de ${anio} a las ${hora}:${minutos}`;
 }
 
+// Helper function to get professor's mpKey by email
+async function getProfessorMpKey(email) {
+  const profesorKeyQuery = await admin.firestore()
+    .collection("profesoresKeyMp")
+    .where("email", "==", email)
+    .limit(1)
+    .get();
+  
+  if (profesorKeyQuery.empty) {
+    throw new functions.https.HttpsError(
+      'not-found', 
+      `No MercadoPago key found for professor: ${email}`
+    );
+  }
+  
+  const profesorKeyDoc = profesorKeyQuery.docs[0];
+  const mpKey = profesorKeyDoc.data().mpKey;
+  
+  if (!mpKey) {
+    throw new functions.https.HttpsError(
+      'failed-precondition', 
+      `MercadoPago key is empty for professor: ${email}`
+    );
+  }
+  
+  return mpKey;
+}
+
 admin.initializeApp();
 
 exports.paymentOkNueva = functions.https.onRequest(async (req, res) => {
@@ -186,13 +214,15 @@ exports.paymentOkNueva = functions.https.onRequest(async (req, res) => {
   }
 });
 
-// Add this new function at the end of your file
 exports.paymentProdNuevaV2 = functions.https.onCall(async (data, context) => {
   console.log("paymentProdNuevaV2 called with data:", data);
   
   try {
-    // Initialize MercadoPago with the professor's key
-    const client = new MercadoPagoConfig({accessToken: data.profesor.mpKey});
+    // Get the mpKey from the database using helper function
+    const mpKey = await getProfessorMpKey(data.profesor.email);
+    
+    // Initialize MercadoPago with the professor's key from database
+    const client = new MercadoPagoConfig({accessToken: mpKey});
     const preference = new Preference(client);
 
     // Create preference data
@@ -213,7 +243,7 @@ exports.paymentProdNuevaV2 = functions.https.onCall(async (data, context) => {
           pending: "https://tuni.com.ar/reservar",
         },
         auto_return: "approved",
-        notification_url: `https://us-central1-prueba-2e666.cloudfunctions.net/paymentOkNueva?mpKey=${data.profesor.mpKey}`,
+        notification_url: `https://us-central1-prueba-2e666.cloudfunctions.net/paymentOkNueva?mpKey=${mpKey}`,
         binary_mode: true,
         metadata: data,
         // Exclude cash payment methods
