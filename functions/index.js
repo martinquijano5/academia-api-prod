@@ -8,8 +8,12 @@ const cors = require('cors')({ origin: true });
 function formatFechaHora(fechaHoraISO) {
   if (!fechaHoraISO) return "fecha no disponible";
   
-  // Create date object without timezone adjustment
-  const date = new Date(fechaHoraISO);
+  // Parse the ISO string directly to avoid timezone conversion
+  // fechaHoraISO format: "2025-07-30T17:00:00.000-03:00"
+  const [datePart, timePart] = fechaHoraISO.split('T');
+  const [year, month, day] = datePart.split('-').map(Number);
+  const [hourMinute] = timePart.split('.');
+  const [hour, minute] = hourMinute.split(':').map(Number);
   
   // Days of the week in Spanish
   const diasSemana = [
@@ -23,16 +27,17 @@ function formatFechaHora(fechaHoraISO) {
     "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
   ];
   
-  // Format the components
-  const diaSemana = diasSemana[date.getDay()];
-  const dia = date.getDate();
-  const mes = meses[date.getMonth()];
-  const anio = date.getFullYear();
-  const hora = date.getHours().toString().padStart(2, '0');
-  const minutos = date.getMinutes().toString().padStart(2, '0');
+  // Create date for day of week calculation (using local timezone is OK for this)
+  const dateForDayOfWeek = new Date(year, month - 1, day);
+  const diaSemana = diasSemana[dateForDayOfWeek.getDay()];
+  const mes = meses[month - 1];
+  
+  // Format time components
+  const horaStr = hour.toString().padStart(2, '0');
+  const minutosStr = minute.toString().padStart(2, '0');
   
   // Return formatted string
-  return `${diaSemana} ${dia} de ${mes} de ${anio} a las ${hora}:${minutos}`;
+  return `${diaSemana} ${day} de ${mes} de ${year} a las ${horaStr}:${minutosStr}`;
 }
 
 // Helper function to get professor's mpKey by email
@@ -88,12 +93,12 @@ function mailingTemplate({
                   <td align="center" style="padding: 20px;">
                       <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" style="max-width: 600px; background-color: #ffffff; border: 1px solid #e0e0e0;">
                           
-                          <!-- Header with Logo -->
-                          <tr>
-                              <td align="center" style="padding: 25px 0; background-color: #ffffff;">
-                                  <img src="https://www.tuni.com.ar/Tuni.png" alt="TUNI Logo" width="180" style="max-width: 180px; height: auto; display: block;">
-                              </td>
-                          </tr>
+                                                      <!-- Header with Logo -->
+                            <tr>
+                                <td align="center" style="padding: 25px 0; background-color: #ffffff;">
+                                    <img src="https://www.tuni.com.ar/Tuni.png" alt="TUNI Logo" width="180" style="max-width: 180px; height: auto; display: block;">
+                                </td>
+                            </tr>
                           
                           <!-- Main Content -->
                           <tr>
@@ -360,32 +365,55 @@ exports.paymentProdNuevaV2 = functions.https.onCall(async (data, context) => {
   console.log("paymentProdNuevaV2 called with data:", data);
   
   try {
+    // Determine if this is a talleres or clases-particulares payment
+    const isTalleres = data.tipoReserva === 'talleres';
+    
+    // Get the professor email based on the reservation type
+    const professorEmail = isTalleres ? data.profesorMail : data.profesor.email;
+    
     // Get the mpKey from the database using helper function
-    const mpKey = await getProfessorMpKey(data.profesor.email);
+    const mpKey = await getProfessorMpKey(professorEmail);
     
     // Initialize MercadoPago with the professor's key from database
     const client = new MercadoPagoConfig({accessToken: mpKey});
     const preference = new Preference(client);
 
+    // Set different URLs based on reservation type
+    const backUrls = isTalleres ? {
+      success: `https://tuni.com.ar/miperfil/`,
+      failure: "https://tuni.com.ar/reservar",
+      pending: "https://tuni.com.ar/reservar",
+    } : {
+      success: `https://tuni.com.ar/confirmarReserva/`,
+      failure: "https://tuni.com.ar/reservar",
+      pending: "https://tuni.com.ar/reservar",
+    };
+
+    const notificationUrl = isTalleres ? 
+      `https://us-central1-prueba-2e666.cloudfunctions.net/paymentOkTalleres?mpKey=${mpKey}` :
+      `https://us-central1-prueba-2e666.cloudfunctions.net/paymentOkNueva?mpKey=${mpKey}`;
+
+    // Create different titles and descriptions based on type
+    const title = isTalleres ? `Clases de Taller - Tuni` : `Clase particular Tuni`;
+    const description = isTalleres ? 
+      `Clases del taller "${data.tallerNombre}" - ${data.selectedClases.length} clase(s)` :
+      `Clase particular con ${data.profesor.nombre} para la materia ${data.materia}`;
+
     // Create preference data
     const preferenceData = {
       body: {
         items: [{
-          title: `Clase particular Tuni`,
+          title: title,
           currency_id: "ARS",
-          picture_url: "https://www.tuni.com.ar/Tuni.svg",
-          description: `Clase particular con ${data.profesor.nombre} para la materia ${data.materia}`,
+          picture_url: "https://www.tuni.com.ar/Tuni.png",
+          description: description,
           category_id: "art",
           unit_price: Number(data.price),
           quantity: 1,
         }],
-        back_urls: {
-          success: `https://tuni.com.ar/confirmarReserva/`,
-          failure: "https://tuni.com.ar/reservar",
-          pending: "https://tuni.com.ar/reservar",
-        },
+        back_urls: backUrls,
         auto_return: "approved",
-        notification_url: `https://us-central1-prueba-2e666.cloudfunctions.net/paymentOkNueva?mpKey=${mpKey}`,
+        notification_url: notificationUrl,
         binary_mode: true,
         metadata: data,
         // Exclude cash payment methods
@@ -426,6 +454,240 @@ exports.paymentProdNuevaV2 = functions.https.onCall(async (data, context) => {
       error.message || 'Unknown error occurred',
       { details: error.toString() }
     );
+  }
+});
+
+exports.paymentOkTalleres = functions.https.onRequest(async (req, res) => {
+  console.log("paymentOkTalleres called");
+  
+  // Extract notification type
+  const notificationType = req.query.topic || (req.body && req.body.action && req.body.action.split('.')[0]);
+  console.log("Notification type:", notificationType);
+  
+  // Only process payment notifications and ignore duplicates
+  if (notificationType !== "payment") {
+    console.log(`Ignoring ${notificationType} notification`);
+    res.status(200).send("OK");
+    return;
+  }
+  
+  // Extract payment ID from different possible sources
+  const paymentId = req.query.id || (req.query['data.id']) || (req.body && req.body.data && req.body.data.id) ||(req.body && req.body.resource);
+                   
+  // Extract MP key
+  const mpKey = req.query.mpKey;
+  
+  if (!paymentId || !mpKey) {
+    console.log("Missing payment ID or MP key");
+    res.status(400).send("Missing required parameters");
+    return;
+  }
+  
+  try {
+    // Create a document reference with just the paymentId as the document ID
+    // This ensures we can't create duplicate documents for the same payment
+    const tallerCompraRef = admin.firestore().collection("tallerCompras").doc(paymentId);
+    
+    // Check if the document already exists
+    const docSnapshot = await tallerCompraRef.get();
+    
+    if (docSnapshot.exists) {
+      console.log(`Taller purchase for payment ${paymentId} already exists. Skipping duplicate notification.`);
+      res.status(200).send("OK - Duplicate notification ignored");
+      return;
+    }
+    
+    // Get payment details from Mercado Pago using Axios
+    const paymentResponse = await axios.get(
+      `https://api.mercadopago.com/v1/payments/${paymentId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${mpKey}`
+        }
+      }
+    );
+    
+    const paymentDetails = paymentResponse.data;
+    
+    // Extract metadata from payment
+    const metadata = paymentDetails.metadata || {};
+    
+    console.log("Full payment details:", JSON.stringify(paymentDetails));
+    console.log("Full metadata:", JSON.stringify(metadata));
+    
+    // Step 1: Create taller purchase document in Firestore
+    const tallerCompraData = {
+      idMercadoPago: paymentId,
+      tallerNombre: metadata.taller_nombre,
+      tallerId: metadata.taller_id,
+      selectedClases: metadata.selected_clases,
+      usuario: metadata.usuario,
+      emailUsuario: metadata.usuario.mail,
+      nombreUsuario: metadata.usuario.nombre,
+      totalPagado: metadata.price,
+      estadoPago: "pagado",
+      createdAt: Date.now(),
+    };   
+    
+    // Create the document with the payment ID as the document ID
+    await tallerCompraRef.set(tallerCompraData);
+    console.log(`Taller purchase created with ID: ${paymentId}`);
+    console.log("tallerCompras document created successfully with data:", JSON.stringify(tallerCompraData, null, 2));
+    
+    // Step 2: Update each selected class to add user to alumnosInscriptos
+    const tallerRef = admin.firestore().collection("talleres").doc(metadata.taller_id);
+    const tallerDoc = await tallerRef.get();
+    
+    if (tallerDoc.exists) {
+      const tallerData = tallerDoc.data();
+      const updatedClases = [...tallerData.clases];
+      
+      // Add user email to alumnosInscriptos for each selected class
+      metadata.selected_clases.forEach(selectedClase => {
+        const claseIndex = selectedClase.index;
+        if (updatedClases[claseIndex]) {
+          if (!updatedClases[claseIndex].alumnosInscriptos) {
+            updatedClases[claseIndex].alumnosInscriptos = [];
+          }
+          // Only add if not already present
+          if (!updatedClases[claseIndex].alumnosInscriptos.includes(metadata.usuario.mail)) {
+            updatedClases[claseIndex].alumnosInscriptos.push(metadata.usuario.mail);
+          }
+        }
+      });
+      
+      // Update the taller document with updated classes
+      await tallerRef.update({ clases: updatedClases });
+      console.log(`Updated taller ${metadata.taller_id} with new student enrollments`);
+    }
+    
+    // Step 3: Send confirmation email to the user
+    try {
+      const classesListHtml = metadata.selected_clases.map(clase => 
+        `<li><strong>${clase.nombre}</strong><br>
+         Descripción: ${clase.descripcion}<br>
+         Fecha: ${formatFechaHora(clase.fecha_hora)}<br>
+         Duración: ${clase.duracion} minutos<br>
+         Profesor: ${clase.profesor_nombre}<br>
+         Link de Meet: <a href="${clase.link_meet}" target="_blank">${clase.link_meet}</a><br>
+         Precio: $${clase.precio}</li>`
+      ).join('');
+
+      // Get WhatsApp group link from taller data
+      const whatsappGroupLink = tallerDoc.exists ? tallerDoc.data().grupoWpp : null;
+      
+      // Create email content array
+      const emailContent = [
+        `<ul style="text-align: left; margin: 0; padding-left: 20px;">${classesListHtml}</ul>`,
+        `<strong>Total pagado: $${metadata.price}</strong>`
+      ];
+
+      // Add WhatsApp group link if it exists
+      if (whatsappGroupLink) {
+        emailContent.push(`<div style="margin-top: 20px; padding: 15px; background-color: #e8f5e8; border-radius: 8px; border-left: 4px solid #28a745;">
+          <strong>📱 Grupo de WhatsApp del Taller:</strong><br>
+          <a href="${whatsappGroupLink}" target="_blank" style="color: #007bff; text-decoration: none;">
+            Unirse al grupo de WhatsApp
+          </a><br>
+          <small style="color: #666;">*Únete al grupo para recibir actualizaciones y comunicarte con otros estudiantes</small>
+        </div>`);
+      }
+      
+      const emailAlumno = {
+        to: metadata.usuario.mail,
+        message: {
+          subject: `¡Inscripción confirmada! - Taller: ${metadata.taller_nombre}`,
+          html: mailingTemplate({
+            title: "¡Pago confirmado!",
+            content: `Hola ${metadata.usuario.nombre || "Estudiante"}! Tu pago para el taller "${metadata.taller_nombre}" ha sido confirmado exitosamente.`,
+            h3Title: "Clases adquiridas:",
+            h3Content: emailContent,
+            buttonText: "Ver taller",
+            buttonLink: "https://www.tuni.com.ar/miperfil/"
+          })
+        },
+      };
+      
+      await admin.firestore().collection("mails").add(emailAlumno);
+      console.log("Confirmation email sent successfully");
+    } catch (emailError) {
+      console.log("Error sending confirmation email:", emailError);
+      // Continue execution even if email fails
+    }
+    
+    // Step 4: Update user document with taller enrollment information
+    try {
+      const userEmail = metadata.usuario.mail;
+      
+      // Query for user document by owner field (since email is not the document ID)
+      const userQuery = await admin.firestore().collection("users")
+        .where("owner", "==", userEmail)
+        .limit(1)
+        .get();
+      
+      let userRef;
+      let userData = {};
+      
+      if (!userQuery.empty) {
+        // User document exists, get the first (and should be only) result
+        const userDocSnapshot = userQuery.docs[0];
+        userRef = userDocSnapshot.ref;
+        userData = userDocSnapshot.data();
+        console.log(`Found existing user document with ID: ${userDocSnapshot.id}`);
+      } else {
+        // User document doesn't exist, create one with email as ID as fallback
+        console.log(`No user document found for ${userEmail}, creating new one`);
+        userRef = admin.firestore().collection("users").doc(userEmail);
+      }
+      
+      // Initialize talleres object if it doesn't exist
+      if (!userData.talleres) {
+        userData.talleres = {};
+      }
+      
+      // Initialize this specific taller if it doesn't exist
+      if (!userData.talleres[metadata.taller_id]) {
+        userData.talleres[metadata.taller_id] = {
+          tallerNombre: metadata.taller_nombre,
+          clasesCompradas: []
+        };
+      }
+      
+      // Add the newly purchased classes
+      const clasesCompradas = userData.talleres[metadata.taller_id].clasesCompradas;
+      metadata.selected_clases.forEach(selectedClase => {
+        // Double-check the class isn't already there (shouldn't happen due to our earlier check)
+        const alreadyExists = clasesCompradas.some(existingClase => existingClase.index === selectedClase.index);
+        if (!alreadyExists) {
+          clasesCompradas.push({
+            index: selectedClase.index,
+            nombre: selectedClase.nombre,
+            descripcion: selectedClase.descripcion,
+            fechaHora: selectedClase.fecha_hora,
+            duracion: selectedClase.duracion,
+            profesorNombre: selectedClase.profesor_nombre,
+            profesorMail: selectedClase.profesor_mail,
+            linkMeet: selectedClase.link_meet,
+            precio: selectedClase.precio,
+            fechaCompra: Date.now()
+          });
+        }
+      });
+      
+      // Update the user document
+      await userRef.set(userData, { merge: true });
+      console.log(`Updated user ${userEmail} with taller enrollment information`);
+      console.log("User talleres data:", JSON.stringify(userData.talleres, null, 2));
+    } catch (userUpdateError) {
+      console.log("Error updating user document:", userUpdateError);
+      // Continue execution even if user update fails
+    }
+    
+    console.log('Taller payment processing completed successfully');
+    res.status(200).send("OK");
+  } catch (error) {
+    console.log("Error processing taller payment:", error);
+    res.status(500).send("Error processing taller payment");
   }
 });
 
