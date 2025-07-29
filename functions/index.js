@@ -63,6 +63,148 @@ async function getProfessorMpKey(email) {
   return mpKey;
 }
 
+// Email template function for consistent styling
+function mailingTemplate({ 
+  title = null, 
+  content = null, 
+  h3Title = null, 
+  h3Content = [null, null, null],
+  buttonText = null,
+  buttonLink = null,
+}) {
+  const hasH3Block = h3Title && h3Content && h3Content.some(item => item);
+
+  return (
+      `<!DOCTYPE html>
+      <html lang="es">
+      <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>${title}</title>
+      </head>
+      <body style="margin: 0; padding: 0; background-color: #f5f5f5; font-family: Arial, Helvetica, sans-serif;">
+          <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f5f5f5;">
+              <tr>
+                  <td align="center" style="padding: 20px;">
+                      <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" style="max-width: 600px; background-color: #ffffff; border: 1px solid #e0e0e0;">
+                          
+                          <!-- Header with Logo -->
+                          <tr>
+                              <td align="center" style="padding: 25px 0; background-color: #ffffff;">
+                                  <img src="https://www.tuni.com.ar/Tuni.png" alt="TUNI Logo" width="180" style="max-width: 180px; height: auto; display: block;">
+                              </td>
+                          </tr>
+                          
+                          <!-- Main Content -->
+                          <tr>
+                              <td style="padding: 30px; background-color: #ffffff;">
+                                  <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                                      <!-- Title -->
+                                      <tr>
+                                          <td align="center" style="padding-bottom: 20px;">
+                                              <h1 style="margin: 0; font-family: Arial, Helvetica, sans-serif; font-size: 28px; font-weight: bold; color: #1a78f2; text-align: center; line-height: 1.2;">
+                                                  ${title}
+                                              </h1>
+                                          </td>
+                                      </tr>
+                                      
+                                      <!-- Content -->
+                                      ${content ? `
+                                      <tr>
+                                          <td style="padding-bottom: 20px;">
+                                              <p style="margin: 0; font-family: Arial, Helvetica, sans-serif; font-size: 16px; line-height: 1.5; color: #1a2942;">
+                                                  ${content}
+                                              </p>
+                                          </td>
+                                      </tr>
+                                      ` : ''}
+                                      
+                                      <!-- Highlighted Box -->
+                                      ${hasH3Block ? `
+                                      <tr>
+                                          <td style="padding: 20px 0;">
+                                              <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f8f9fa; border: 1px solid #e9ecef;">
+                                                  <tr>
+                                                      <td style="padding: 25px;">
+                                                          <h3 style="margin: 0 0 15px 0; font-family: Arial, Helvetica, sans-serif; font-size: 20px; font-weight: bold; color: #1a2942; text-align: center;">
+                                                              ${h3Title}
+                                                          </h3>
+                                                          ${h3Content.filter(item => item).map(item => `
+                                                          <p style="margin: 10px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.5; color: #1a2942; text-align: center;">
+                                                              ${item}
+                                                          </p>
+                                                          `).join('')}
+                                                      </td>
+                                                  </tr>
+                                              </table>
+                                          </td>
+                                      </tr>
+                                      ` : ''}
+                                      
+                                      <!-- Button -->
+                                      ${buttonText && buttonLink ? `
+                                      <tr>
+                                          <td align="center" style="padding: 30px 0 20px 0;">
+                                              <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                                                  <tr>
+                                                      <td style="background-color: #1a78f2;">
+                                                          <a href="${buttonLink}" target="_blank" style="display: inline-block; padding: 18px 35px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: bold; color: #ffffff; text-decoration: none; text-transform: uppercase; letter-spacing: 0.5px;">
+                                                              ${buttonText}
+                                                          </a>
+                                                      </td>
+                                                  </tr>
+                                              </table>
+                                          </td>
+                                      </tr>
+                                      ` : ''}
+                                      
+                                      <!-- Closing Messages -->
+                                      <tr>
+                                          <td align="center" style="padding-top: 20px;">
+                                              <p style="margin: 5px 0; font-family: Arial, Helvetica, sans-serif; font-size: 16px; color: #1a2942;">
+                                                  Nos vemos en clase
+                                              </p>
+                                              <p style="margin: 5px 0; font-family: Arial, Helvetica, sans-serif; font-size: 16px; font-weight: bold; color: #1a78f2;">
+                                                  ¡Stay Tunied!
+                                              </p>
+                                          </td>
+                                      </tr>
+                                  </table>
+                              </td>
+                          </tr>
+                          
+                          <!-- Footer -->
+                          <tr>
+                              <td style="padding: 25px; background-color: #f8f9fa; border-top: 1px solid #e9ecef;">
+                                  <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                                      <tr>
+                                          <td align="center" style="padding-bottom: 15px;">
+                                              <a href="https://www.instagram.com/tuni.academy" target="_blank" style="margin: 0 10px; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: #1a78f2; text-decoration: none; font-weight: bold;">Instagram</a>
+                                              <span style="margin: 0 5px; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: #555555;">|</span>
+                                              <a href="https://www.tuni.com.ar/" target="_blank" style="margin: 0 10px; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: #1a78f2; text-decoration: none; font-weight: bold;">Página web</a>
+                                              <span style="margin: 0 5px; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: #555555;">|</span>
+                                              <a href="https://wa.me/5491135004141" target="_blank" style="margin: 0 10px; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: #1a78f2; text-decoration: none; font-weight: bold;">WhatsApp</a>
+                                          </td>
+                                      </tr>
+                                      <tr>
+                                          <td align="center">
+                                              <p style="margin: 0; font-family: Arial, Helvetica, sans-serif; font-size: 12px; color: #555555;">
+                                                  © 2025 TUNI
+                                              </p>
+                                          </td>
+                                      </tr>
+                                  </table>
+                              </td>
+                          </tr>
+                      </table>
+                  </td>
+              </tr>
+          </table>
+      </body>
+      </html>`
+  )
+}
+
 admin.initializeApp();
 
 exports.paymentOkNueva = functions.https.onRequest(async (req, res) => {
@@ -185,18 +327,18 @@ exports.paymentOkNueva = functions.https.onRequest(async (req, res) => {
         to: metadata.usuario.mail,
         message: {
           subject: `Reserva pagada para tu clase de ${metadata.materia}`,
-          html: `
-            <h1>Reserva pagada</h1>
-            <br/>
-            <p>Hola ${metadata.usuario.nombre || "Estudiante"},</p>
-            <p>Tu pago para la clase de ${metadata.materia} del dia ${formatFechaHora(metadata.fecha_hora)} ha sido confirmado.</p>
-            <p>Para confirmar tu reserva, por favor ingresa al siguiente enlace:</p>
-            <p><a href=${`http://tuni.com.ar/confirmarReserva/?payment_id=${paymentId}&status=approved`}>http://tuni.com.ar/confirmarReserva/?payment_id=${paymentId}&status=approved</a></p>
-            <p>Una vez confirmada la reserva, recibirás un correo de confirmación con el enlace para unirte a la clase.</p>
-            <p>Si ya confirmaste la reserva, no es necesario que ingreses al enlace.</p>
-            <br/>
-            <p>¡Gracias por confiar en nosotros para tu aprendizaje!</p>
-          `,
+          html: mailingTemplate({
+            title: "¡Pago confirmado!",
+            content: `Hola ${metadata.usuario.nombre || "Estudiante"}! Tu pago para la clase de ${metadata.materia} del día ${formatFechaHora(metadata.fecha_hora)} ha sido confirmado.`,
+            h3Title: "Próximo paso",
+            h3Content: [
+              "Para confirmar tu reserva, hacé clic en el botón de abajo",
+              "Una vez confirmada la reserva, recibirás un correo con el enlace para unirte a la clase",
+              "Si ya confirmaste la reserva, no es necesario que ingreses al enlace nuevamente"
+            ],
+            buttonText: "Confirmar reserva",
+            buttonLink: `http://tuni.com.ar/confirmarReserva/?payment_id=${paymentId}&status=approved`
+          })
         },
       };
       
