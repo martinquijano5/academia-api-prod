@@ -394,7 +394,7 @@ exports.paymentProdNuevaV2 = functions.https.onCall(async (data, context) => {
       `https://us-central1-prueba-2e666.cloudfunctions.net/paymentOkNueva?mpKey=${mpKey}`;
 
     // Create different titles and descriptions based on type
-    const title = isTalleres ? `Clases de Taller - Tuni` : `Clase particular Tuni`;
+    const title = isTalleres ? `Clases de Taller - Tuni` : `Clase particular - Tuni`;
     const description = isTalleres ? 
       `Clases del taller "${data.tallerNombre}" - ${data.selectedClases.length} clase(s)` :
       `Clase particular con ${data.profesor.nombre} para la materia ${data.materia}`;
@@ -516,15 +516,29 @@ exports.paymentOkTalleres = functions.https.onRequest(async (req, res) => {
     console.log("Full metadata:", JSON.stringify(metadata));
     
     // Step 1: Create taller purchase document in Firestore
+    // Clean selectedClases to remove unnecessary data like alumnosInscriptos
+    const cleanSelectedClases = metadata.selected_clases.map(clase => ({
+      index: clase.index,
+      nombre: clase.nombre,
+      descripcion: clase.descripcion,
+      fechaHora: clase.fecha_hora,
+      duracion: clase.duracion,
+      profesorNombre: clase.profesor_nombre,
+      profesorMail: clase.profesor_mail,
+      linkMeet: clase.link_meet,
+      precio: clase.precio
+    }));
+
     const tallerCompraData = {
       idMercadoPago: paymentId,
       tallerNombre: metadata.taller_nombre,
       tallerId: metadata.taller_id,
-      selectedClases: metadata.selected_clases,
-      usuario: metadata.usuario,
+      selectedClases: cleanSelectedClases,
       emailUsuario: metadata.usuario.mail,
       nombreUsuario: metadata.usuario.nombre,
       totalPagado: metadata.price,
+      discountPercentage: metadata.discount_percentage,
+      discountAmount: metadata.discount_amount,
       estadoPago: "pagado",
       createdAt: Date.now(),
     };   
@@ -576,10 +590,30 @@ exports.paymentOkTalleres = functions.https.onRequest(async (req, res) => {
       // Get WhatsApp group link from taller data
       const whatsappGroupLink = tallerDoc.exists ? tallerDoc.data().grupoWpp : null;
       
+      // Calculate original price and format pricing display
+      let pricingDisplay;
+      
+      // Check if there was a discount applied
+      if (metadata.discount_percentage && metadata.discount_percentage > 0) {
+        // Calculate original price from discounted price and discount amount
+        const originalPrice = parseFloat(metadata.price) + parseFloat(metadata.discount_amount || 0);
+        
+        pricingDisplay = `<div style="display: flex; align-items: center; justify-content: center; gap: 10px;">
+          <span style="text-decoration: line-through; color: #666; font-size: 16px;">$${originalPrice.toFixed(0)}</span>
+          <strong style="color: #1A78F2; font-size: 18px;">$${metadata.price}</strong>
+          <span style="background-color: #059669; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">
+            ${metadata.discount_percentage}% OFF
+          </span>
+        </div>`;
+      } else {
+        // No discount, show regular price
+        pricingDisplay = `<strong>$${metadata.price}</strong>`;
+      }
+
       // Create email content array
       const emailContent = [
         `<ul style="text-align: left; margin: 0; padding-left: 20px;">${classesListHtml}</ul>`,
-        `<strong>Total pagado: $${metadata.price}</strong>`
+        `<strong>Total pagado: ${pricingDisplay}</strong>`
       ];
 
       // Add WhatsApp group link if it exists
@@ -589,7 +623,7 @@ exports.paymentOkTalleres = functions.https.onRequest(async (req, res) => {
           <a href="${whatsappGroupLink}" target="_blank" style="color: #007bff; text-decoration: none;">
             Unirse al grupo de WhatsApp
           </a><br>
-          <small style="color: #666;">*Únete al grupo para recibir actualizaciones y comunicarte con otros estudiantes</small>
+          <small style="color: #666;">*Unite al grupo para recibir actualizaciones y comunicarte con otros estudiantes</small>
         </div>`);
       }
       
@@ -645,12 +679,19 @@ exports.paymentOkTalleres = functions.https.onRequest(async (req, res) => {
         userData.talleres = {};
       }
       
+      // Get WhatsApp group link from taller data
+      const whatsappGroupLink = tallerDoc.exists ? tallerDoc.data().grupoWpp : null;
+      
       // Initialize this specific taller if it doesn't exist
       if (!userData.talleres[metadata.taller_id]) {
         userData.talleres[metadata.taller_id] = {
           tallerNombre: metadata.taller_nombre,
-          clasesCompradas: []
+          clasesCompradas: [],
+          grupoWpp: whatsappGroupLink
         };
+      } else {
+        // Update WhatsApp group link in case it changed
+        userData.talleres[metadata.taller_id].grupoWpp = whatsappGroupLink;
       }
       
       // Add the newly purchased classes
