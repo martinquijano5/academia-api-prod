@@ -316,15 +316,58 @@ exports.paymentOkNueva = functions.https.onRequest(async (req, res) => {
         video: " ",
         createdAt: Date.now(),
         precio: metadata.price || " ",
+        precioOriginal: metadata.original_price || metadata.price || " ",
         cantAlumnos: metadata.cant_alumnos || 1,
         universidad: metadata.universidad.codigo || " ",
-        carrera: `${metadata.carrera.codigo_universidad} ${metadata.carrera.nombre}` || " ",
+        carrera: `${metadata.carrera.codigoUniversidad} ${metadata.carrera.nombre}` || " ",
+        // Discount code information
+        codigoDescuento: metadata.discount_code ? {
+          codigo: metadata.discount_code.codigo,
+          tipoDescuento: metadata.discount_code.tipo_descuento,
+          valorDescuento: metadata.discount_code.valor_descuento,
+          descuentoAplicado: metadata.discount_code.descuento_aplicado
+        } : null
       }
     };   
     
     // Create the document with the payment ID as the document ID
     await reservationRef.set(reservaData);
     console.log(`Reservation created with ID: ${paymentId}`);
+    
+    // Step 3.5: Mark discount code as used if one was applied
+    if (metadata.discount_code && metadata.discount_code.codigo) {
+      try {
+        const codigoQuery = await admin.firestore()
+          .collection("codigos")
+          .where("codigo", "==", metadata.discount_code.codigo.toUpperCase())
+          .limit(1)
+          .get();
+        
+        if (!codigoQuery.empty) {
+          const codigoDoc = codigoQuery.docs[0];
+          const codigoData = codigoDoc.data();
+          
+          // Increment usage count
+          const currentTimestamp = Date.now();
+          await codigoDoc.ref.update({
+            vecesUsado: (codigoData.vecesUsado || 0) + 1,
+            ultimoUso: currentTimestamp,
+            // Add usage history
+            historialUso: admin.firestore.FieldValue.arrayUnion({
+              fecha: currentTimestamp,
+              usuario: metadata.usuario.mail,
+              reservaId: paymentId,
+              montoDescuento: metadata.discount_code.descuento_aplicado
+            })
+          });
+          
+          console.log(`Discount code ${metadata.discount_code.codigo} marked as used`);
+        }
+      } catch (discountError) {
+        console.error("Error updating discount code usage:", discountError);
+        // Continue execution even if discount code update fails
+      }
+    }
     
     // Step 4: Send confirmation email to the user
     try {
