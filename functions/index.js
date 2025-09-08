@@ -807,3 +807,119 @@ exports.getAllUserss = functions.https.onRequest(async (req, res) => {
     }
   });
 });
+
+// Function to create 50 discount codes for the job fair
+exports.createFeriaDiscountCodes = functions.https.onRequest(async (req, res) => {
+  console.log("createFeriaDiscountCodes called");
+  
+  // Enable CORS for web requests
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'GET, POST');
+  res.set('Access-Control-Allow-Headers', 'Content-Type');
+  
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
+  
+  try {    
+    const userEmail = 'mquijano@udesa.edu.ar';
+    console.log("User creating feria discount codes:", userEmail);
+    
+    // Set expiration date to December 31, 2025
+    const expirationDate = new Date('2025-12-31T23:59:59.999Z');
+    
+    const createdCodes = [];
+    const failedCodes = [];
+    
+    // Helper function to generate random 5-character alphanumeric string
+    const generateRandomCode = () => {
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+      let result = '';
+      for (let i = 0; i < 5; i++) {
+        result += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      return result;
+    };
+    
+    // Create 50 codes
+    let attempts = 0;
+    const maxAttempts = 200; // Safety limit to avoid infinite loops
+    
+    while (createdCodes.length < 50 && attempts < maxAttempts) {
+      attempts++;
+      
+      try {
+        // Generate random 5-character code
+        const randomCode = generateRandomCode();
+        const codigo = `FERIA-${randomCode}`;
+        
+        // Check if code already exists
+        const existingCodeQuery = await admin.firestore()
+          .collection("codigos")
+          .where("codigo", "==", codigo)
+          .limit(1)
+          .get();
+        
+        if (!existingCodeQuery.empty) {
+          console.log(`Code ${codigo} already exists, generating new one`);
+          continue; // Try again with a new random code
+        }
+        
+        // Create the discount code document
+        const codigoDoc = {
+          codigo: codigo,
+          tipoDescuento: 'porcentaje',
+          valorDescuento: 15,
+          descripcion: 'Gracias por pasar por nuestro stand en la feria de trabajo',
+          fechaCreacion: admin.firestore.FieldValue.serverTimestamp(),
+          fechaExpiracion: admin.firestore.Timestamp.fromDate(expirationDate),
+          limitUsos: 1,
+          vecesUsado: 0,
+          montoMinimo: null,
+          activo: true,
+          creadoPor: userEmail,
+          historialUso: []
+        };
+        
+        // Add to Firestore
+        const docRef = await admin.firestore().collection("codigos").add(codigoDoc);
+        
+        createdCodes.push({ codigo, id: docRef.id });
+        console.log(`Created discount code: ${codigo} with ID: ${docRef.id}`);
+        
+      } catch (error) {
+        console.error(`Error creating code ${codigo}:`, error);
+        failedCodes.push({ 
+          codigo: codigo, 
+          reason: error.message 
+        });
+      }
+    }
+    
+    // Check if we couldn't create all 50 codes
+    if (createdCodes.length < 50) {
+      console.log(`Warning: Only created ${createdCodes.length} codes out of 50 requested after ${attempts} attempts`);
+    }
+    
+    console.log(`Feria discount codes creation completed. Created: ${createdCodes.length}, Failed: ${failedCodes.length}`);
+    
+    res.status(200).json({
+      success: true,
+      created: createdCodes.length,
+      failed: failedCodes.length,
+      createdCodes: createdCodes,
+      failedCodes: failedCodes,
+      message: `Successfully created ${createdCodes.length} discount codes for the job fair`
+    });
+    
+  } catch (error) {
+    console.error("Error creating feria discount codes:", error);
+    
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Error creating feria discount codes',
+      details: error.toString()
+    });
+  }
+});
